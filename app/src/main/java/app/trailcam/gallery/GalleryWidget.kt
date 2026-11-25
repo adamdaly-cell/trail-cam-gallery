@@ -50,7 +50,7 @@ class GalleryWidget : AppWidgetProvider() {
             views.setTextViewText(
                 R.id.widget_sub,
                 if (last > 0) "Updated " + SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(Date(last))
-                else "Tap ↻ after saving in GardePro"
+                else "Tap ↻ to fetch from GardePro"
             )
             views.setViewVisibility(R.id.widget_refresh, View.VISIBLE)
 
@@ -58,9 +58,12 @@ class GalleryWidget : AppWidgetProvider() {
             val openApp = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), immutable)
             views.setOnClickPendingIntent(R.id.widget_header, openApp)
 
-            // Refresh re-scans the saved-media folder in place (no screen capture needed any more).
-            val refresh = PendingIntent.getBroadcast(
-                ctx, 2, Intent(ctx, GalleryWidget::class.java).setAction(ACTION_REFRESH), immutable
+            // Refresh fetches new media: it opens the app, which drives GardePro's save and returns.
+            val refresh = PendingIntent.getActivity(
+                ctx, 2,
+                Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_GET_NEW, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                immutable
             )
             views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
 

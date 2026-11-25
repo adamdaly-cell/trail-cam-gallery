@@ -26,6 +26,7 @@ class MainActivity : Activity() {
 
     companion object {
         const val GARDEPRO_PKG = "com.zpszjs.gardepro.mobile"
+        const val EXTRA_GET_NEW = "get_new"
         private const val REQ_MEDIA = 1
     }
 
@@ -71,10 +72,45 @@ class MainActivity : Activity() {
             adapter = this@MainActivity.adapter
         }
         syncButton.text = getString(R.string.get_new)
-        syncButton.setOnClickListener { openGardePro() }
+        syncButton.setOnClickListener { getNew() }
         findViewById<ImageButton>(R.id.settings).setOnClickListener { showSettings() }
 
         if (!hasMediaPerms()) requestPermissions(mediaPerms, REQ_MEDIA)
+        else if (intent?.getBooleanExtra(EXTRA_GET_NEW, false) == true) {
+            intent.removeExtra(EXTRA_GET_NEW)
+            getNew()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_GET_NEW, false)) getNew()
+    }
+
+    /**
+     * Fetch new media. With the accessibility service on, the app drives GardePro's
+     * Select → Select All → Save itself and the user only answers Android's "Allow" prompt.
+     * Without it, offer to turn it on or just open GardePro.
+     */
+    private fun getNew() {
+        val service = TrailAccessibilityService.instance
+        if (service != null) {
+            Toast.makeText(this, "Saving from GardePro… tap Allow if Android asks.", Toast.LENGTH_LONG).show()
+            service.getNew()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("One-tap fetching is off")
+            .setMessage(
+                "Turn on Trail Cam Gallery under Android Settings → Accessibility → Installed apps, " +
+                    "and Get new will do the Select → Select All → Save taps in GardePro for you.\n\n" +
+                    "If it already shows as on, switch it off and on again (needed after an app update)."
+            )
+            .setPositiveButton("Open Accessibility") { _, _ ->
+                try { startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (_: Exception) {}
+            }
+            .setNegativeButton("Just open GardePro") { _, _ -> openGardePro() }
+            .show()
     }
 
     override fun onResume() {
@@ -138,9 +174,11 @@ class MainActivity : Activity() {
         box.addView(TextView(this).apply {
             text = "This gallery shows the full-resolution photos and videos that the official " +
                 "GardePro app has saved to this device (DCIM/GardePro Mobile).\n\n" +
-                "To add new media: open GardePro, tap Select, then Select All, then the save icon. " +
-                "It downloads from GardePro's cloud — it never wakes the camera, so it uses no " +
-                "camera battery. Come back here (or tap Refresh) and the new items appear."
+                "Get new opens GardePro and does Select → Select All → Save for you (this needs " +
+                "Trail Cam Gallery switched on under Android Settings → Accessibility). Android then " +
+                "asks you to allow GardePro to write the videos — tap Allow — and the app comes back " +
+                "here with the new items.\n\nIt downloads from GardePro's cloud and never wakes the " +
+                "camera, so it uses no camera battery."
             setPadding(0, pad / 2, 0, pad / 2)
         })
 
