@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Trail Cam Gallery</string>
+    <string name="widget_label">Trail Cam Gallery</string>
+    <string name="widget_title">Trail Cam</string>
+    <string name="widget_empty">No saved videos yet — tap ↻ to fetch</string>
+    <string name="get_new">Get new</string>
+    <string name="refresh">Refresh</string>
+    <string name="a11y_description">Lets Trail Cam Gallery tap Select, Select All and Save in the official GardePro app for you, so one tap fetches your new videos. It only taps while GardePro is on screen and never answers Android\'s own prompts.</string>
+    <string name="settings">How it works</string>
+    <string name="no_media">No saved media yet</string>
+    <string name="need_permission_short">Media access needed</string>
+    <string name="need_permission">To show your photos and videos, allow this app access to photos and media.\n\nOpen Android Settings → Apps → Trail Cam Gallery → Permissions, and allow Photos/Media.</string>
+    <string name="empty_help">No videos yet.
+
+Tap \"Get new\": the app opens the official GardePro app, saves its full-resolution videos to this device, and comes back. Android will ask you to allow GardePro to write the videos — tap Allow.
+
+It downloads from GardePro\'s cloud and never wakes the camera, so it uses no camera battery.</string>
+</resources>
