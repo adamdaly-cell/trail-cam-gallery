@@ -2,12 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- The mirror captures the screen from a foreground service and posts a progress notification -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Read the full-resolution photos and videos the GardePro app saved to DCIM/GardePro Mobile -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
-    <!-- See which app is in front, to open the official GardePro app for the mirror -->
+    <!-- So we can open the official GardePro app for the user to save new media -->
     <queries>
         <package android:name="com.zpszjs.gardepro.mobile" />
     </queries>
@@ -35,36 +37,6 @@
             android:parentActivityName=".MainActivity"
             android:theme="@style/ViewerTheme" />
 
-
-        <service
-            android:name=".MirrorService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-
-        <activity
-            android:name=".CaptureActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-
-        <activity
-            android:name=".CalibrationActivity"
-            android:exported="false"
-            android:screenOrientation="locked"
-            android:theme="@style/ViewerTheme" />
-
-        <service
-            android:name=".TrailAccessibilityService"
-            android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_config" />
-        </service>
-
         <service
             android:name=".GalleryWidgetService"
             android:exported="false"
@@ -81,15 +53,5 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/gallery_widget_info" />
         </receiver>
-
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.files"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
     </application>
 </manifest>

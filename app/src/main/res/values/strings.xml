@@ -3,10 +3,12 @@
     <string name="app_name">Trail Cam Gallery</string>
     <string name="widget_label">Trail Cam Gallery</string>
     <string name="widget_title">Trail Cam</string>
-    <string name="widget_empty">No photos yet — tap ↻ to mirror</string>
-    <string name="sync">Sync</string>
-    <string name="settings">Settings</string>
-    <string name="not_synced">Not synced yet</string>
-    <string name="a11y_description">Lets Trail Cam Gallery scroll the official GardePro gallery while mirroring it, so it can capture your whole photo history, not just the first screen. It only performs scroll gestures.</string>
-    <string name="empty_help_mirror">Tap Sync to mirror your photos.\n\nMake sure the official GardePro app is installed and signed in. The app opens GardePro, reads the photos already on its gallery screen, and shows them here and in the home-screen widget. It never wakes the camera, so it uses no camera battery. The first time, you\'ll tap the corners of a photo once so it knows the layout.</string>
+    <string name="widget_empty">No saved media yet — in GardePro: Select → Save</string>
+    <string name="get_new">Get new</string>
+    <string name="refresh">Refresh</string>
+    <string name="settings">How it works</string>
+    <string name="no_media">No saved media yet</string>
+    <string name="need_permission_short">Media access needed</string>
+    <string name="need_permission">To show your photos and videos, allow this app access to photos and media.\n\nOpen Android Settings → Apps → Trail Cam Gallery → Permissions, and allow Photos/Media.</string>
+    <string name="empty_help">No photos or videos yet.\n\nIn the official GardePro app: tap Select, then Select All, then the save icon. It downloads the full-resolution photos and videos to this device (it never wakes the camera, so it uses no camera battery). Then come back here — they\'ll appear automatically.\n\nTap \"Get new\" to open GardePro.</string>
 </resources>

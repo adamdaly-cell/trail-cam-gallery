@@ -14,24 +14,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Home-screen widget: a scrolling grid of the newest photos, with a sync button. */
+/** Home-screen widget: a scrolling grid of the saved GardePro photos and videos. */
 class GalleryWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
         for (id in ids) mgr.updateAppWidget(id, build(ctx, id))
-        @Suppress("DEPRECATION")
         mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_grid)
     }
 
+    override fun onReceive(ctx: Context, intent: Intent) {
+        super.onReceive(ctx, intent)
+        if (intent.action == ACTION_REFRESH) refreshAll(ctx)
+    }
+
     companion object {
-        const val EXTRA_SYNC = "sync"
+        const val ACTION_REFRESH = "app.trailcam.gallery.REFRESH_WIDGET"
 
         fun refreshAll(ctx: Context) {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, GalleryWidget::class.java))
             if (ids.isEmpty()) return
             for (id in ids) mgr.updateAppWidget(id, build(ctx, id))
-            @Suppress("DEPRECATION")
             mgr.notifyAppWidgetViewDataChanged(ids, R.id.widget_grid)
         }
 
@@ -40,32 +43,24 @@ class GalleryWidget : AppWidgetProvider() {
 
             val adapter = Intent(ctx, GalleryWidgetService::class.java)
             adapter.data = Uri.parse(adapter.toUri(Intent.URI_INTENT_SCHEME) + "#$widgetId")
-            @Suppress("DEPRECATION")
             views.setRemoteAdapter(R.id.widget_grid, adapter)
             views.setEmptyView(R.id.widget_grid, R.id.widget_empty)
 
-            val state = SyncState.status.value
-            val last = Prefs.lastSync(ctx)
+            val last = Prefs.lastScan(ctx)
             views.setTextViewText(
                 R.id.widget_sub,
-                when {
-                    state.running -> state.text.ifBlank { "Syncing…" }
-                    state.error != null -> state.error
-                    last > 0 -> "Updated " + SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(Date(last))
-                    else -> "Not synced yet"
-                }
+                if (last > 0) "Updated " + SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(Date(last))
+                else "Tap ↻ after saving in GardePro"
             )
-            views.setViewVisibility(R.id.widget_refresh, if (state.running) View.INVISIBLE else View.VISIBLE)
+            views.setViewVisibility(R.id.widget_refresh, View.VISIBLE)
 
             val immutable = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             val openApp = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), immutable)
             views.setOnClickPendingIntent(R.id.widget_header, openApp)
 
-            // Mirroring needs the screen-capture consent dialog, which must come from an activity,
-            // so the widget's refresh opens the app and starts a sync there.
-            val refresh = PendingIntent.getActivity(
-                ctx, 2, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SYNC, true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), immutable
+            // Refresh re-scans the saved-media folder in place (no screen capture needed any more).
+            val refresh = PendingIntent.getBroadcast(
+                ctx, 2, Intent(ctx, GalleryWidget::class.java).setAction(ACTION_REFRESH), immutable
             )
             views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
 
@@ -89,7 +84,8 @@ class GalleryWidgetService : RemoteViewsService() {
         override fun onDestroy() {}
 
         override fun onDataSetChanged() {
-            items = GalleryStore.load(ctx).filter { GalleryStore.thumb(ctx, it).exists() }.take(60)
+            items = GalleryStore.load(ctx).take(80)
+            Prefs.setLastScan(ctx, System.currentTimeMillis())
         }
 
         override fun getCount(): Int = items.size
@@ -97,7 +93,7 @@ class GalleryWidgetService : RemoteViewsService() {
         override fun getViewAt(position: Int): RemoteViews? {
             val item = items.getOrNull(position) ?: return null
             val views = RemoteViews(ctx.packageName, R.layout.item_media)
-            GalleryStore.decode(GalleryStore.thumb(ctx, item), 240)?.let {
+            GalleryStore.thumbnail(ctx, item, 240)?.let {
                 views.setImageViewBitmap(R.id.item_image, it)
             }
             views.setViewVisibility(R.id.item_badge, if (item.video) View.VISIBLE else View.GONE)
@@ -111,12 +107,4 @@ class GalleryWidgetService : RemoteViewsService() {
         override fun getItemId(position: Int): Long = items.getOrNull(position)?.key?.hashCode()?.toLong() ?: 0L
         override fun hasStableIds(): Boolean = true
     }
-}
-
-/** "2026-11-24 07:15:02" -> "24 Nov 07:15" */
-fun shortDate(date: String): String = try {
-    val parsed = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(date)
-    if (parsed != null) SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(parsed) else date
-} catch (e: Exception) {
-    date
 }

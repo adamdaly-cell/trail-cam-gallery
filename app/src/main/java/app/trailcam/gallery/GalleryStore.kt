@@ -1,121 +1,133 @@
 package app.trailcam.gallery
 
+import android.content.ContentUris
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.File
+import android.net.Uri
+import android.provider.MediaStore
+import android.util.Size
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.regex.Pattern
 
 /**
- * One photo or video. [cloudKey] is set when the item came from the GardePro cloud rather than a
- * direct camera link; it holds the object key used to download from cloud storage.
+ * One photo or video that the official GardePro app has saved to this device, under
+ * DCIM/GardePro Mobile/. These are the real, full-resolution files (and playable videos), read
+ * straight from shared storage — not screen captures.
  */
 data class MediaItem(
-    val id: Int,
+    val uri: Uri,
     val video: Boolean,
-    val date: String,
+    val date: Long,      // capture time, epoch millis
     val size: Long,
-    val cloudKey: String? = null,
+    val name: String,    // file name, used as a stable key
 ) {
-    /** Stable local name. Ids restart after the SD card is formatted, so the date is part of it. */
-    val key: String get() = "${id}_" + date.filter { it.isDigit() }
-
-    /** The type token the camera's file routes expect. */
-    val ext: String get() = if (video) "MP4" else "JPG"
-
-    val fromCloud: Boolean get() = cloudKey != null
+    val key: String get() = name
 }
 
 object Prefs {
-    const val DEFAULT_WIFI_PASS = "1234567890"
-    const val DEFAULT_NAME_PREFIX = "CAM"
-
     fun sp(ctx: Context): SharedPreferences = ctx.getSharedPreferences("camera", Context.MODE_PRIVATE)
-
-    fun bleMac(ctx: Context): String? = sp(ctx).getString("ble_mac", null)
-    fun bleName(ctx: Context): String? = sp(ctx).getString("ble_name", null)
-    fun namePrefix(ctx: Context): String =
-        sp(ctx).getString("name_prefix", null)?.takeIf { it.isNotBlank() } ?: DEFAULT_NAME_PREFIX
-    fun wifiPass(ctx: Context): String =
-        sp(ctx).getString("wifi_pass", null)?.takeIf { it.isNotBlank() } ?: DEFAULT_WIFI_PASS
-    fun ssid(ctx: Context): String = sp(ctx).getString("ssid", "") ?: ""
-    fun directUrl(ctx: Context): String = (sp(ctx).getString("direct_url", "") ?: "").trim().trimEnd('/')
-    fun fullPhotos(ctx: Context): Boolean = sp(ctx).getBoolean("full_photos", true)
-    fun lastSync(ctx: Context): Long = sp(ctx).getLong("last_sync", 0L)
-    fun cameraInfo(ctx: Context): String = sp(ctx).getString("camera_info", "") ?: ""
+    fun lastScan(ctx: Context): Long = sp(ctx).getLong("last_scan", 0L)
+    fun setLastScan(ctx: Context, t: Long) = sp(ctx).edit().putLong("last_scan", t).apply()
 }
 
-/** Local copy of the camera's gallery: an index plus thumbnail and full-size files. */
+/**
+ * Reads the GardePro-saved media from shared storage. The folder fills when the user runs
+ * Select → Save in the official GardePro app; this just lists whatever is there, newest first.
+ */
 object GalleryStore {
-    private val lock = Any()
 
-    private fun dir(ctx: Context) = File(ctx.filesDir, "media").apply { mkdirs() }
-    private fun indexFile(ctx: Context) = File(dir(ctx), "index.json")
+    /** The album the official GardePro app saves downloaded media into. */
+    const val ALBUM = "GardePro Mobile"
 
-    fun thumb(ctx: Context, item: MediaItem) = File(dir(ctx), "t_${item.key}.jpg")
-    fun full(ctx: Context, item: MediaItem) = File(dir(ctx), "f_${item.key}.${item.ext.lowercase()}")
+    private val stampPattern = Pattern.compile("(\\d{14})")
 
-    fun load(ctx: Context): List<MediaItem> = synchronized(lock) {
-        val f = indexFile(ctx)
-        if (!f.exists()) return emptyList()
-        try {
-            val arr = JSONArray(f.readText())
-            (0 until arr.length()).map {
-                val o = arr.getJSONObject(it)
-                MediaItem(
-                    o.getInt("id"), o.getBoolean("video"), o.getString("date"), o.optLong("size"),
-                    o.optString("cloudKey").takeIf { k -> k.isNotBlank() }
-                )
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
+    fun load(ctx: Context): List<MediaItem> {
+        val all = ArrayList<MediaItem>()
+        query(ctx, video = false, all)
+        query(ctx, video = true, all)
+        all.sortWith(compareByDescending<MediaItem> { it.date }.thenByDescending { it.name })
+        return all
     }
 
     fun find(ctx: Context, key: String): MediaItem? = load(ctx).firstOrNull { it.key == key }
 
-    /**
-     * Replace the index with what the camera now reports. Items that have left the camera
-     * (card rotated or formatted) are kept only if their full-size file was downloaded.
-     */
-    fun merge(ctx: Context, onCamera: List<MediaItem>): List<MediaItem> = synchronized(lock) {
-        val keys = onCamera.map { it.key }.toSet()
-        val kept = load(ctx).filter { it.key !in keys && full(ctx, it).exists() }
-        val all = (onCamera + kept).distinctBy { it.key }
-            .sortedWith(compareByDescending<MediaItem> { it.date }.thenByDescending { it.id })
-        val arr = JSONArray()
-        for (it in all) {
-            arr.put(
-                JSONObject().put("id", it.id).put("video", it.video).put("date", it.date)
-                    .put("size", it.size).put("cloudKey", it.cloudKey ?: "")
-            )
+    private fun query(ctx: Context, video: Boolean, out: MutableList<MediaItem>) {
+        val collection = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val dateCol = if (video) MediaStore.Video.Media.DATE_TAKEN else MediaStore.Images.Media.DATE_TAKEN
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            dateCol,
+        )
+        // Match the GardePro album by its relative path (e.g. "DCIM/GardePro Mobile/").
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val args = arrayOf("%$ALBUM%")
+        try {
+            ctx.contentResolver.query(collection, projection, selection, args, null)?.use { c ->
+                val idIdx = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameIdx = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val sizeIdx = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                val modIdx = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                val takenIdx = c.getColumnIndex(dateCol)
+                while (c.moveToNext()) {
+                    val id = c.getLong(idIdx)
+                    val name = c.getString(nameIdx) ?: id.toString()
+                    val size = c.getLong(sizeIdx)
+                    val date = dateFromName(name)
+                        ?: (if (takenIdx >= 0 && !c.isNull(takenIdx)) c.getLong(takenIdx) else 0L)
+                            .takeIf { it > 0 }
+                        ?: c.getLong(modIdx) * 1000L
+                    out.add(MediaItem(ContentUris.withAppendedId(collection, id), video, date, size, name))
+                }
+            }
+        } catch (_: Exception) {
+            // Missing permission or provider hiccup: just return what we have.
         }
-        val tmp = File(dir(ctx), "index.json.tmp")
-        tmp.writeText(arr.toString())
-        tmp.renameTo(indexFile(ctx))
-        // Drop files that no longer belong to any item.
-        val valid = all.flatMap { listOf(thumb(ctx, it).name, full(ctx, it).name) }.toSet() + "index.json"
-        dir(ctx).listFiles()?.forEach { if (it.name !in valid && !it.name.endsWith(".part")) it.delete() }
-        all
     }
 
-    fun clear(ctx: Context) = synchronized(lock) {
-        dir(ctx).listFiles()?.forEach { it.delete() }
-    }
-
-    /** Decode an image file scaled down to roughly [maxPx] on its longest side. */
-    fun decode(file: File, maxPx: Int): Bitmap? {
-        if (!file.exists()) return null
+    /** GardePro names files like MAC_YYYYMMDDHHMMSS_seq_X.ext; pull the capture time out of that. */
+    private fun dateFromName(name: String): Long? {
+        val m = stampPattern.matcher(name)
+        if (!m.find()) return null
         return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.path, bounds)
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
-            BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-        } catch (e: Throwable) {
+            SimpleDateFormat("yyyyMMddHHmmss", Locale.US).parse(m.group(1)!!)?.time
+        } catch (_: Exception) {
             null
         }
     }
+
+    /** A grid-sized thumbnail for an item (works for both photos and videos). */
+    fun thumbnail(ctx: Context, item: MediaItem, px: Int): Bitmap? = try {
+        ctx.contentResolver.loadThumbnail(item.uri, Size(px, px), null)
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** The full image, downsampled to roughly [maxPx] on its longest side. Photos only. */
+    fun fullImage(ctx: Context, item: MediaItem, maxPx: Int): Bitmap? {
+        if (item.video) return null
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            ctx.contentResolver.openInputStream(item.uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+}
+
+/** epoch millis -> "24 Nov 07:15"; 0 -> "" */
+fun shortDate(ms: Long): String {
+    if (ms <= 0) return ""
+    return SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date(ms))
 }
