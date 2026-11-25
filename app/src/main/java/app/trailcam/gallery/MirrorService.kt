@@ -42,6 +42,7 @@ class MirrorService : Service() {
         private const val CHANNEL = "mirror"
         private const val NOTE_ID = 2
         private const val SETTLE_MS = 5_000L     // time for the GardePro gallery to render
+        private const val MAX_PAGES = 20         // most screens to scroll through in one sync
 
         fun calibrationFrame(ctx: Context) = File(ctx.cacheDir, "calibration.png")
     }
@@ -94,18 +95,17 @@ class MirrorService : Service() {
                 startActivity(it)
             } ?: throw IllegalStateException("The GardePro app is not installed")
 
+            Thread.sleep(SETTLE_MS)   // let the GardePro gallery finish rendering
             MirrorState.status.value = "Capturing…"
-            val frame = grabFrame(w, h) ?: throw IllegalStateException("Could not capture the screen")
 
             if (mode == MODE_CALIBRATE) {
+                val frame = grabFrame(w, h) ?: throw IllegalStateException("Could not capture the screen")
                 FileOutputStream(calibrationFrame(this)).use { frame.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 teardown()
                 startActivity(Intent(this, CalibrationActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } else {
                 val cal = Calibration.load(this) ?: throw IllegalStateException("Not calibrated yet")
-                MirrorState.status.value = "Adding photos…"
-                val tiles = TileGrid.extract(frame, cal)
-                val added = MirrorStore.add(this, tiles)
+                val added = capturePages(w, h, cal)
                 Prefs.sp(this).edit().putLong("last_sync", System.currentTimeMillis()).apply()
                 teardown()
                 SyncState.changed()
@@ -124,11 +124,90 @@ class MirrorService : Service() {
         finish(error)
     }
 
-    /** Grab a stable frame: discard the first couple (mid-render) and keep a later one. */
+    /**
+     * Capture the gallery page by page: grab a screen, add its new tiles, then (if the accessibility
+     * service is enabled) scroll to the next screen and repeat until a page yields nothing new or the
+     * page limit is reached. Returns the total number of new photos added.
+     */
+    private fun capturePages(w: Int, h: Int, cal: Calibration): Int {
+        val a11y = TrailAccessibilityService.instance
+        // GardePro resumes wherever it was last scrolled, so rewind to the newest photos first.
+        if (a11y != null) scrollToTop(w, h, cal, a11y)
+        var total = 0
+        for (page in 0 until MAX_PAGES) {
+            val frame = grabFrame(w, h) ?: break
+            val tiles = TileGrid.extract(frame, cal)
+            frame.recycle()
+            val added = MirrorStore.add(this, tiles)
+            tiles.forEach { it.recycle() }
+            total += added
+            MirrorState.status.value = "Mirrored $total photo(s)…"
+            SyncState.changed()
+            GalleryWidget.refreshAll(this)
+            // Stop when this page brought nothing new (caught up / end of list) after the first.
+            if (added == 0 && page > 0) break
+            if (a11y == null) break   // can't scroll without the accessibility service
+            // Swipe up to reveal older photos. Both ends stay well inside the photo area (never on
+            // the bottom nav bar), or the gesture lands on a non-scrolling element and does nothing.
+            val sx = (if (cal.capW > 0) w.toFloat() / cal.capW else 1f)
+            val sy = (if (cal.capH > 0) h.toFloat() / cal.capH else 1f)
+            val x = (cal.x0 + cal.tileW / 2f) * sx
+            val top = cal.y0 * sy
+            val gh = ((if (cal.bottomLimit > 0) cal.bottomLimit else cal.capH) * sy) - top
+            if (gh < 80f) break
+            val yStart = top + gh * 0.62f
+            val yEnd = top + gh * 0.08f
+            a11y.scroll(x, yStart, yEnd)
+            Thread.sleep(1_400)       // let the scroll settle before the next capture
+        }
+        return total
+    }
+
+    /** Scroll GardePro up to the newest photos: swipe down until the screen stops changing. */
+    private fun scrollToTop(w: Int, h: Int, cal: Calibration, a11y: TrailAccessibilityService) {
+        val sx = if (cal.capW > 0) w.toFloat() / cal.capW else 1f
+        val sy = if (cal.capH > 0) h.toFloat() / cal.capH else 1f
+        val x = (cal.x0 + cal.tileW / 2f) * sx
+        val top = cal.y0 * sy
+        val gh = ((if (cal.bottomLimit > 0) cal.bottomLimit else cal.capH) * sy) - top
+        if (gh < 80f) return
+        val yHigh = top + gh * 0.10f
+        val yLow = top + gh * 0.64f
+        var prev = 0L
+        for (i in 0 until 30) {
+            val f = grabFrame(w, h) ?: return
+            val hsh = frameHash(f)
+            f.recycle()
+            if (i > 0 && hsh == prev) return    // no change -> reached the top
+            prev = hsh
+            a11y.scroll(x, yHigh, yLow)          // swipe downward to reveal newer photos
+            Thread.sleep(1_000)
+        }
+    }
+
+    /** Coarse 64-bit average hash of a frame, for detecting whether the screen changed. */
+    private fun frameHash(bmp: Bitmap): Long {
+        val s = Bitmap.createScaledBitmap(bmp, 8, 8, true)
+        var sum = 0; val v = IntArray(64)
+        for (y in 0 until 8) for (x in 0 until 8) {
+            val p = s.getPixel(x, y)
+            val l = ((p shr 16 and 0xff) * 30 + (p shr 8 and 0xff) * 59 + (p and 0xff) * 11) / 100
+            v[y * 8 + x] = l; sum += l
+        }
+        s.recycle()
+        val avg = sum / 64
+        var bits = 0L
+        for (i in 0 until 64) if (v[i] >= avg) bits = bits or (1L shl i)
+        return bits
+    }
+
+    /**
+     * Grab the current display frame. Reads several times over ~1.5s and keeps the LAST frame, so a
+     * stale image buffered before a scroll is never returned.
+     */
     private fun grabFrame(w: Int, h: Int): Bitmap? {
-        Thread.sleep(SETTLE_MS)
         var result: Bitmap? = null
-        repeat(6) {
+        repeat(8) {
             val image = reader?.acquireLatestImage()
             if (image != null) {
                 try {
@@ -144,7 +223,7 @@ class MirrorService : Service() {
                     image.close()
                 }
             }
-            Thread.sleep(500)
+            Thread.sleep(200)
         }
         return result
     }

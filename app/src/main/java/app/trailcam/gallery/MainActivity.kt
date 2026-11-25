@@ -214,6 +214,21 @@ class MainActivity : Activity() {
             setPadding(0, pad / 2, 0, 0)
         })
 
+        heading("Full history (optional)")
+        val scrollOn = TrailAccessibilityService.instance != null
+        box.addView(TextView(this).apply {
+            text = "Scrolling: " + if (scrollOn) "on ✓ — captures your whole gallery" else "off — only the newest screen is captured"
+            setPadding(0, pad / 2, 0, pad / 4)
+        })
+        box.addView(TextView(this).apply {
+            text = if (scrollOn) "Turn off in Android Settings → Accessibility" else "Tap here to turn on (Android Settings → Accessibility → Trail Cam Gallery)"
+            setTextColor(0xFF3F8F5F.toInt())
+            setPadding(0, 0, 0, pad / 2)
+            setOnClickListener {
+                try { startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) {}
+            }
+        })
+
         val scroll = android.widget.ScrollView(this).apply { addView(box) }
         AlertDialog.Builder(this)
             .setTitle("Settings")

@@ -10,5 +10,6 @@
     <string name="not_synced">Not synced yet</string>
     <string name="need_bluetooth">Bluetooth permission is needed to wake the camera. Tap Sync on the main screen to allow it.</string>
     <string name="empty_help">Stand within about 10 m of the camera and tap Sync.\n\nThe app wakes the camera over Bluetooth, then Android asks once to join the camera\'s own Wi-Fi. Photos are copied to the phone, so the gallery and the home-screen widget keep working when you walk away.</string>
+    <string name="a11y_description">Lets Trail Cam Gallery scroll the official GardePro gallery while mirroring it, so it can capture your whole photo history, not just the first screen. It only performs scroll gestures.</string>
     <string name="empty_help_mirror">Tap Sync to mirror your photos.\n\nMake sure the official GardePro app is installed and signed in. The app opens GardePro, reads the photos already on its gallery screen, and shows them here and in the home-screen widget. It never wakes the camera, so it uses no camera battery. The first time, you\'ll tap the corners of a photo once so it knows the layout.</string>
 </resources>
