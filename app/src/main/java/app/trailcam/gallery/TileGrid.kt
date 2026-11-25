@@ -46,9 +46,73 @@ object TileGrid {
 
     fun isCalibrated(ctx: Context) = Calibration.load(ctx) != null
 
-    /** Crop a captured screen into tile bitmaps, row-major from the top-left (newest first). */
+    /** Crop a captured screen into tile bitmaps, top (newest) first. */
     fun extract(bmp: Bitmap, cal: Calibration): List<Bitmap> {
-        // Scale the calibration if the capture size differs from when it was measured.
+        // The official app stacks photos in a single column, each separated by a near-black
+        // gutter, and the newest photo is partly hidden under the app's header. Rather than
+        // step a fixed row pitch (which the hidden newest photo throws out of alignment),
+        // detect the gutters and crop the band between each pair. Calibration still tells us
+        // the column's horizontal position (x0/tileW), the nav-bar line (bottomLimit) and the
+        // rough photo height (rowPitch) used to reject slivers.
+        if (cal.cols <= 1) {
+            val byGutter = extractColumnByGutters(bmp, cal)
+            if (byGutter.isNotEmpty()) return byGutter
+        }
+        return extractFixedGrid(bmp, cal)
+    }
+
+    /** Single column: find the dark gutters between photos and crop each band. */
+    private fun extractColumnByGutters(bmp: Bitmap, cal: Calibration): List<Bitmap> {
+        val sx = if (cal.capW > 0) bmp.width.toFloat() / cal.capW else 1f
+        val sy = if (cal.capH > 0) bmp.height.toFloat() / cal.capH else 1f
+        val x0 = (cal.x0 * sx).toInt().coerceIn(0, bmp.width - 2)
+        val tileW = (cal.tileW * sx).toInt().coerceAtMost(bmp.width - x0)
+        val rowPitch = (cal.rowPitch * sy).coerceAtLeast(1f)
+        val bottom = (if (cal.bottomLimit > 0) cal.bottomLimit * sy else bmp.height.toFloat())
+            .toInt().coerceIn(1, bmp.height)
+        if (tileW <= 2) return emptyList()
+
+        // Mean brightness of each row across the photo column; sample a handful of columns.
+        val samples = 32
+        val step = (tileW / samples).coerceAtLeast(1)
+        val dark = BooleanArray(bmp.height)
+        val cols = IntArray(samples) { (x0 + it * step).coerceAtMost(x0 + tileW - 1) }
+        val rowBuf = IntArray(cols.size)
+        for (y in 0 until bmp.height) {
+            var sum = 0
+            for (i in cols.indices) {
+                val p = bmp.getPixel(cols[i], y)
+                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+                sum += (r * 77 + g * 151 + b * 28) shr 8   // ~luma
+                rowBuf[i] = p
+            }
+            dark[y] = sum / cols.size < GUTTER_LUMA
+        }
+
+        // Bands = runs of non-dark rows between gutters, down to the nav bar.
+        // A band may be truncated at the top (the newest photo tucks under the app header,
+        // but keeps its caption strip at the bottom, so we keep it). A band truncated at the
+        // bottom loses its caption; we drop it, since the photo reappears whole on the next
+        // page and would otherwise be stored as an ugly near-duplicate.
+        val minH = (rowPitch * 0.5f).toInt()
+        val maxH = (rowPitch * 1.4f).toInt()
+        val bottomMargin = (rowPitch * 0.15f).toInt()
+        val out = mutableListOf<Bitmap>()
+        var y = 0
+        while (y < bottom) {
+            if (dark[y]) { y++; continue }
+            val top = y
+            while (y < bottom && !dark[y]) y++
+            val h = y - top
+            if (h in minH..maxH && top + h <= bottom - bottomMargin) {
+                try { out.add(Bitmap.createBitmap(bmp, x0, top, tileW, h)) } catch (_: Exception) {}
+            }
+        }
+        return out
+    }
+
+    /** Fixed-grid fallback (multi-column, or if gutter detection finds nothing). */
+    private fun extractFixedGrid(bmp: Bitmap, cal: Calibration): List<Bitmap> {
         val sx = if (cal.capW > 0) bmp.width.toFloat() / cal.capW else 1f
         val sy = if (cal.capH > 0) bmp.height.toFloat() / cal.capH else 1f
         val x0 = (cal.x0 * sx).toInt()
@@ -78,4 +142,6 @@ object TileGrid {
         }
         return out
     }
+
+    private const val GUTTER_LUMA = 22   // rows darker than this are gutters/nav/header
 }
