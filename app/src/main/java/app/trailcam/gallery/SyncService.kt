@@ -78,9 +78,10 @@ class SyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val missing = missingPermissions(this)
+        val usesDevice = Prefs.directUrl(this).isEmpty()
         val type = when {
             Build.VERSION.SDK_INT < 34 -> 0
-            missing.isEmpty() && Prefs.directUrl(this).isEmpty() -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            missing.isEmpty() && usesDevice -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         }
         val note = notification("Connecting to the camera…")

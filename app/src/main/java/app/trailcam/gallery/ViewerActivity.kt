@@ -79,33 +79,34 @@ class ViewerActivity : Activity() {
         val item = item ?: return
         val full = GalleryStore.full(this, item)
         val haveFull = full.exists()
-        if (haveFull && !item.video) {
-            if (!shownFull) {
-                GalleryStore.decode(full, 2400)?.let {
-                    image.setImageBitmap(it)
-                    shownFull = true
-                }
-            }
+        // A cloud photo's downloaded object is already the full image, so its thumbnail IS the photo.
+        val photoReady = !item.video && (haveFull || item.fromCloud)
+        if (photoReady && !shownFull) {
+            val src = if (haveFull) full else GalleryStore.thumb(this, item)
+            GalleryStore.decode(src, 2400)?.let { image.setImageBitmap(it); shownFull = true }
         } else if (image.drawable == null) {
             image.setImageBitmap(GalleryStore.decode(GalleryStore.thumb(this, item), 1024))
         }
 
         val state = SyncState.status.value
         val sizeMb = if (item.size > 0) " · %.1f MB".format(item.size / 1048576.0) else ""
+        val showingFull = haveFull || photoReady
         info.text = when {
             state.running -> state.text
-            state.error != null && !haveFull -> state.error
-            else -> shortDate(item.date) + sizeMb + if (haveFull) "" else " · preview"
+            state.error != null && !showingFull -> state.error
+            else -> shortDate(item.date) + sizeMb + if (showingFull) "" else " · preview"
         }
-        action.isEnabled = haveFull || !state.running
+        // What the button does: open an image/ready video; otherwise download a video.
+        val canOpen = haveFull || photoReady
+        action.isEnabled = canOpen || !state.running
         action.text = when {
             haveFull && item.video -> "Play video"
-            haveFull -> "Open / share"
+            canOpen -> "Open / share"
             item.video -> "Download video"
             else -> "Get full size"
         }
         action.setOnClickListener {
-            if (haveFull) openExternally(item) else fetch(item)
+            if (canOpen) openExternally(item) else fetch(item)
         }
         action.visibility = View.VISIBLE
     }
@@ -119,7 +120,10 @@ class ViewerActivity : Activity() {
     }
 
     private fun openExternally(item: MediaItem) {
-        val uri = FileProvider.getUriForFile(this, "$packageName.files", GalleryStore.full(this, item))
+        // Prefer the downloaded full file; for a cloud photo the thumbnail is the full image.
+        val full = GalleryStore.full(this, item)
+        val src = if (full.exists()) full else GalleryStore.thumb(this, item)
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", src)
         val view = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, if (item.video) "video/mp4" else "image/jpeg")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

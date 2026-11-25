@@ -69,17 +69,46 @@ class MainActivity : Activity() {
             layoutManager = GridLayoutManager(this@MainActivity, columns)
             adapter = this@MainActivity.adapter
         }
-        syncButton.setOnClickListener { startSync() }
+        syncButton.setOnClickListener { startMirror() }
         findViewById<View>(R.id.settings).setOnClickListener { showSettings() }
 
         scope.launch { SyncState.galleryVersion.collectLatest { reload() } }
         scope.launch { SyncState.status.collectLatest { showStatus(it) } }
-        if (intent?.getBooleanExtra(GalleryWidget.EXTRA_SYNC, false) == true) startSync()
+        scope.launch { MirrorState.status.collectLatest { showStatus(SyncState.status.value) } }
+        scope.launch {
+            MirrorState.error.collectLatest { err ->
+                if (err != null) { showStatus(SyncState.status.value) }
+            }
+        }
+        scope.launch {
+            MirrorState.lastAdded.collectLatest { n ->
+                if (n > 0) android.widget.Toast.makeText(this@MainActivity, "Added $n new photo(s)", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        if (intent?.getBooleanExtra(GalleryWidget.EXTRA_SYNC, false) == true) startMirror()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(GalleryWidget.EXTRA_SYNC, false)) startSync()
+        if (intent.getBooleanExtra(GalleryWidget.EXTRA_SYNC, false)) startMirror()
+    }
+
+    /** Capture the official GardePro app's gallery. First run walks through calibration. */
+    private fun startMirror() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !Prefs.sp(this).getBoolean("asked_notifications", false)
+        ) {
+            Prefs.sp(this).edit().putBoolean("asked_notifications", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+            return
+        }
+        val mode = if (TileGrid.isCalibrated(this)) MirrorService.MODE_REFRESH else MirrorService.MODE_CALIBRATE
+        if (mode == MirrorService.MODE_CALIBRATE) {
+            android.widget.Toast.makeText(this, "First, a quick one-time setup: I'll open GardePro and you'll tap the photo corners.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        MirrorState.error.value = null
+        CaptureActivity.start(this, mode)
     }
 
     override fun onResume() {
@@ -97,14 +126,19 @@ class MainActivity : Activity() {
         items = GalleryStore.load(this)
         adapter.notifyDataSetChanged()
         emptyText.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        emptyText.setText(R.string.empty_help_mirror)
         showStatus(SyncState.status.value)
     }
 
     private fun showStatus(s: SyncState.Status) {
-        progress.visibility = if (s.running) View.VISIBLE else View.INVISIBLE
-        syncButton.isEnabled = !s.running
+        val mirror = MirrorState.status.value
+        val busy = s.running || mirror.isNotEmpty()
+        progress.visibility = if (busy) View.VISIBLE else View.INVISIBLE
+        syncButton.isEnabled = !busy
         val last = Prefs.lastSync(this)
         statusText.text = when {
+            mirror.isNotEmpty() -> mirror
+            MirrorState.error.value != null && !s.running -> MirrorState.error.value
             s.running -> s.text
             s.error != null -> s.error
             last > 0 -> listOf(
@@ -135,10 +169,10 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         GalleryWidget.refreshAll(this)
-        if (SyncService.missingPermissions(this).isEmpty()) {
-            SyncService.start(this)
-        } else {
-            statusText.text = getString(R.string.need_bluetooth)
+        when (requestCode) {
+            2 -> startMirror()   // notification permission answered; proceed to capture
+            else -> if (SyncService.missingPermissions(this).isEmpty()) SyncService.start(this)
+            else statusText.text = getString(R.string.need_bluetooth)
         }
     }
 
@@ -149,44 +183,48 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad / 2, pad, 0)
         }
-        fun field(label: String, value: String, hint: String): EditText {
-            box.addView(TextView(this).apply { text = label; setPadding(0, pad / 2, 0, 0) })
+        fun heading(text: String) = box.addView(TextView(this).apply {
+            this.text = text
+            setPadding(0, pad, 0, 0)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        })
+        fun field(label: String, value: String, hint: String, password: Boolean = false): EditText {
+            box.addView(TextView(this).apply { this.text = label; setPadding(0, pad / 2, 0, 0) })
             return EditText(this).apply {
                 setText(value)
                 this.hint = hint
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                inputType = InputType.TYPE_CLASS_TEXT or
+                    if (password) InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 setSingleLine()
                 box.addView(this)
             }
         }
-        val pass = field("Camera Wi-Fi password", sp.getString("wifi_pass", "") ?: "", "Factory default")
-        val ssid = field("Camera Wi-Fi name (only if it is not found)", Prefs.ssid(this), "Automatic")
-        val direct = field("Direct camera address (advanced)", Prefs.directUrl(this), "Off — use Bluetooth + Wi-Fi")
-        val full = CheckBox(this).apply {
-            text = "Also download full-size photos (newest 100)"
-            isChecked = Prefs.fullPhotos(this@MainActivity)
-            box.addView(this)
-        }
-        val paired = Prefs.bleName(this) ?: Prefs.bleMac(this)
+
+        heading("How it works")
         box.addView(TextView(this).apply {
-            text = if (paired != null) "Camera: $paired" else "No camera remembered yet"
+            text = "Sync opens the official GardePro app, reads the photos on its gallery screen, " +
+                "and shows them here and in the home-screen widget. It never wakes the camera, so it " +
+                "uses no camera battery.\n\nMake sure the GardePro app is installed and signed in."
+            setPadding(0, pad / 2, 0, pad / 2)
+        })
+        val calibrated = TileGrid.isCalibrated(this)
+        box.addView(TextView(this).apply {
+            text = if (calibrated) "Photo layout: calibrated ✓" else "Photo layout: not set up yet"
             setPadding(0, pad / 2, 0, 0)
         })
+
+        val scroll = android.widget.ScrollView(this).apply { addView(box) }
         AlertDialog.Builder(this)
             .setTitle("Settings")
-            .setView(box)
-            .setPositiveButton("Save") { _, _ ->
-                sp.edit()
-                    .putString("wifi_pass", pass.text.toString().trim())
-                    .putString("ssid", ssid.text.toString().trim())
-                    .putString("direct_url", direct.text.toString().trim())
-                    .putBoolean("full_photos", full.isChecked)
-                    .apply()
-                GalleryWidget.refreshAll(this)
-            }
-            .setNegativeButton("Cancel", null)
-            .setNeutralButton("Forget camera") { _, _ ->
-                sp.edit().remove("ble_mac").remove("ble_name").apply()
+            .setView(scroll)
+            .setPositiveButton("Done", null)
+            .setNeutralButton("Redo photo setup") { _, _ ->
+                Prefs.sp(this).edit()
+                    .remove("cal_x0").remove("cal_y0").remove("cal_tileW").remove("cal_tileH")
+                    .remove("cal_colPitch").remove("cal_rowPitch").remove("cal_cols").remove("cal_bottom")
+                    .remove("cal_capW").remove("cal_capH").apply()
+                android.widget.Toast.makeText(this, "Tap Sync to set up the photo layout again.", android.widget.Toast.LENGTH_LONG).show()
             }
             .show()
     }

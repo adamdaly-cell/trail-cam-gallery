@@ -8,13 +8,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** One photo or video on the camera. */
-data class MediaItem(val id: Int, val video: Boolean, val date: String, val size: Long) {
+/**
+ * One photo or video. [cloudKey] is set when the item came from the GardePro cloud rather than a
+ * direct camera link; it holds the object key used to download from cloud storage.
+ */
+data class MediaItem(
+    val id: Int,
+    val video: Boolean,
+    val date: String,
+    val size: Long,
+    val cloudKey: String? = null,
+) {
     /** Stable local name. Ids restart after the SD card is formatted, so the date is part of it. */
     val key: String get() = "${id}_" + date.filter { it.isDigit() }
 
     /** The type token the camera's file routes expect. */
     val ext: String get() = if (video) "MP4" else "JPG"
+
+    val fromCloud: Boolean get() = cloudKey != null
 }
 
 object Prefs {
@@ -53,7 +64,10 @@ object GalleryStore {
             val arr = JSONArray(f.readText())
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
-                MediaItem(o.getInt("id"), o.getBoolean("video"), o.getString("date"), o.optLong("size"))
+                MediaItem(
+                    o.getInt("id"), o.getBoolean("video"), o.getString("date"), o.optLong("size"),
+                    o.optString("cloudKey").takeIf { k -> k.isNotBlank() }
+                )
             }
         } catch (e: Exception) {
             emptyList()
@@ -73,7 +87,10 @@ object GalleryStore {
             .sortedWith(compareByDescending<MediaItem> { it.date }.thenByDescending { it.id })
         val arr = JSONArray()
         for (it in all) {
-            arr.put(JSONObject().put("id", it.id).put("video", it.video).put("date", it.date).put("size", it.size))
+            arr.put(
+                JSONObject().put("id", it.id).put("video", it.video).put("date", it.date)
+                    .put("size", it.size).put("cloudKey", it.cloudKey ?: "")
+            )
         }
         val tmp = File(dir(ctx), "index.json.tmp")
         tmp.writeText(arr.toString())
