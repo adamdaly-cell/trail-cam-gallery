@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -42,17 +43,21 @@ class TrailAccessibilityService : AccessibilityService() {
      */
     fun scroll(x: Float, y1: Float, y2: Float): Boolean {
         val path = Path().apply { moveTo(x, y1); lineTo(x, y2) }
+        // A slower stroke scrolls as a controlled drag instead of a fling, so it advances a
+        // predictable distance (about one photo) without overshooting or snapping back.
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 350))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 520))
             .build()
         val latch = CountDownLatch(1)
         var ok = false
+        var cancelled = false
         val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(d: GestureDescription?) { ok = true; latch.countDown() }
-            override fun onCancelled(d: GestureDescription?) { latch.countDown() }
+            override fun onCancelled(d: GestureDescription?) { cancelled = true; latch.countDown() }
         }, null)
-        if (!dispatched) return false
-        try { latch.await(3, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        if (!dispatched) { Log.w("TrailMirror", "dispatchGesture returned false (gesture rejected)"); return false }
+        val fired = try { latch.await(3, TimeUnit.SECONDS) } catch (_: InterruptedException) { false }
+        Log.i("TrailMirror", "gesture dispatched=$dispatched fired=$fired completed=$ok cancelled=$cancelled")
         SystemClock.sleep(200)
         return ok
     }
