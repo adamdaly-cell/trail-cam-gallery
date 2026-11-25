@@ -44,13 +44,16 @@ object GalleryStore {
     const val ALBUM = "GardePro Mobile"
 
     private val stampPattern = Pattern.compile("(\\d{14})")
+    private val copySuffix = Regex(" \\(\\d+\\)(?=\\.[^.]+$)")
 
     fun load(ctx: Context): List<MediaItem> {
         val all = ArrayList<MediaItem>()
         query(ctx, video = false, all)
         query(ctx, video = true, all)
-        all.sortWith(compareByDescending<MediaItem> { it.date }.thenByDescending { it.name })
-        return all
+        // GardePro saves everything again on each Save, as "name (1).MP4", "name (2).MP4"…
+        // Show each clip once, preferring the original file.
+        val unique = all.sortedBy { it.name.length }.distinctBy { it.name.replace(copySuffix, "") }
+        return unique.sortedWith(compareByDescending<MediaItem> { it.date }.thenByDescending { it.name })
     }
 
     fun find(ctx: Context, key: String): MediaItem? = load(ctx).firstOrNull { it.key == key }
