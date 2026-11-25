@@ -112,11 +112,8 @@ class ViewerActivity : Activity() {
     }
 
     private fun fetch(item: MediaItem) {
-        if (SyncService.missingPermissions(this).isNotEmpty()) {
-            Toast.makeText(this, R.string.need_bluetooth, Toast.LENGTH_LONG).show()
-            return
-        }
-        SyncService.start(this, item.key)
+        // Mirrored videos are only a still frame here; open the official app to watch the clip.
+        Toast.makeText(this, "Open the GardePro app to watch this video", Toast.LENGTH_LONG).show()
     }
 
     private fun openExternally(item: MediaItem) {

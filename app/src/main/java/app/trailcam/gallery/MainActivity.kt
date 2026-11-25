@@ -150,30 +150,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startSync() {
-        val need = SyncService.missingPermissions(this).toMutableList()
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !Prefs.sp(this).getBoolean("asked_notifications", false)
-        ) {
-            need += Manifest.permission.POST_NOTIFICATIONS
-            Prefs.sp(this).edit().putBoolean("asked_notifications", true).apply()
-        }
-        if (need.isNotEmpty()) {
-            requestPermissions(need.toTypedArray(), 1)
-            return
-        }
-        SyncService.start(this)
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         GalleryWidget.refreshAll(this)
-        when (requestCode) {
-            2 -> startMirror()   // notification permission answered; proceed to capture
-            else -> if (SyncService.missingPermissions(this).isEmpty()) SyncService.start(this)
-            else statusText.text = getString(R.string.need_bluetooth)
-        }
+        if (requestCode == 2) startMirror()   // notification permission answered; proceed to capture
     }
 
     private fun showSettings() {

@@ -61,11 +61,11 @@ class GalleryWidget : AppWidgetProvider() {
             val openApp = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), immutable)
             views.setOnClickPendingIntent(R.id.widget_header, openApp)
 
-            // Sync straight from the widget when allowed; otherwise open the app to ask for permissions.
-            val refresh = if (SyncService.missingPermissions(ctx).isEmpty())
-                PendingIntent.getForegroundService(ctx, 1, SyncService.intent(ctx), immutable)
-            else PendingIntent.getActivity(
-                ctx, 2, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SYNC, true), immutable
+            // Mirroring needs the screen-capture consent dialog, which must come from an activity,
+            // so the widget's refresh opens the app and starts a sync there.
+            val refresh = PendingIntent.getActivity(
+                ctx, 2, Intent(ctx, MainActivity::class.java).putExtra(EXTRA_SYNC, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), immutable
             )
             views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
 

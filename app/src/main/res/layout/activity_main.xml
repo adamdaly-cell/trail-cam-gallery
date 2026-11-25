@@ -80,7 +80,7 @@
             android:gravity="center"
             android:lineSpacingMultiplier="1.2"
             android:padding="32dp"
-            android:text="@string/empty_help"
+            android:text="@string/empty_help_mirror"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="15sp" />
     </FrameLayout>

@@ -45,14 +45,13 @@ it, only the first screen is captured.
   camera's own burned-in timestamp rather than a parsed date.
 - Crop accuracy depends on the one-time tap calibration; redo it from Settings if photos
   look offset.
-- The home-screen widget's refresh button still triggers the old nearby sync.
+- Screen-capture consent is still requested on every Sync (no hands-off auto-refresh yet).
 
-## Other code in this repo (not the active path)
-Earlier approaches are still present but not wired to the Sync button:
-- `CameraApi` / `CameraLink` / `SyncService`: direct nearby sync over Bluetooth + the
-  camera's Wi-Fi. Works, but wakes the camera and drains its battery.
-
-A GardePro cloud sign-in was tried and removed: it is undocumented and could not be made to work.
+## History
+Earlier approaches (direct Bluetooth/Wi-Fi sync, and a GardePro cloud sign-in) were tried
+and removed: the nearby sync drained the camera battery, and the cloud login uses an
+undocumented scheme that could not be replicated without probing GardePro's servers. The
+app now does the screen mirror only and needs no Bluetooth, Wi-Fi or network permissions.
 
 ## Build
 Needs JDK 17 and the Android SDK (platform 35).
